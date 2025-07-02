@@ -189,16 +189,20 @@ class Agent2ActorCritic:
     def encode_observation(self, obs):
         """Encode observation consistently"""
         if obs is None:
-            return np.array([0.0, 0.0])  # Return array instead of scalar
+            return np.array([0.0, 0.0, 0.0, 0.0])  # Return array instead of scalar
 
         obs_mapping = {}
         for obs_key in self.env.observations:
-            if obs_key == 'n':
-                obs_mapping[obs_key] = np.array([-1.0, -1.0])
+            if obs_key[0] == 'n' and obs_key[1] != 'n':
+                obs_mapping[obs_key] = np.array([-1.0, -1.0, obs_key[1][0], obs_key[1][1]])
+            elif obs_key[0] != 'n' and obs_key[1] == 'n':
+                obs_mapping[obs_key] = np.array([obs_key[0][0], obs_key[0][1], -1.0, -1.0])
+            elif obs_key[0] == 'n' and obs_key[1] == 'n':
+                obs_mapping[obs_key] = np.array([-1.0, -1.0, -1.0, -1.0])
             else:
                 obs_mapping[obs_key] = np.array(obs_key) / np.array([self.env.width - 1, self.env.height - 1])
 
-        return obs_mapping.get(obs, np.array([0.0, 0.0]))  # Return array instead of scalar
+        return obs_mapping.get(obs, np.array([0.0, 0.0, 0.0, 0.0]))  # Return array instead of scalar
 
     def prepare_observation_sequence(self, episode_obs, max_length=None):
         """Prepare observation sequence for neural network input"""
@@ -359,86 +363,6 @@ class Agent2ActorCritic:
         self.reset_episode_buffers()
 
         return total_actor_loss / num_updates, total_critic_loss / num_updates, entropy_loss.item()
-
-    # def train_episode(self, max_steps=20, alpha=1):
-    #     """Train for one episode with improved stability"""
-    #     total_reward = 0
-    #     total_entropy = 0
-    #     total_probs = 0
-    #
-    #     state = random.choices(self.env.initial_states, self.env.initial_dist_sampling, k=1)[0]
-    #     self.episode_states.append(state)
-    #     s = self.env.states.index(state)
-    #     self.episode_ss.append(s)
-    #
-    #     for step in range(max_steps):
-    #         state_tensor = self.encode_state(state)
-    #         value = self.critic(state_tensor)
-    #
-    #         obs_sequence = self.prepare_observation_sequence(self.episode_obs)
-    #         agent2_action, log_prob, entropy = self.select_action(obs_sequence, training=True)
-    #         act = self.env.actions[agent2_action]
-    #         self.episode_as.append(agent2_action)
-    #
-    #         obs = self.env.observation_function_sampler(state, act)
-    #         self.episode_obs.append(obs)
-    #
-    #         state = self.env.next_state_sampler(state, act)
-    #         s = self.env.states.index(state)
-    #
-    #         entropy_diff, prob_diff = info_rewards.reward_function(self.episode_obs, self.episode_as)
-    #         reward = entropy_diff - alpha * prob_diff
-    #
-    #         # Check if episode should terminate
-    #         done = state in self.env.sink_states
-    #
-    #         self.episode_states.append(state)
-    #         self.episode_ss.append(s)
-    #         self.episode_actions.append(act)
-    #         self.episode_rewards.append(reward)
-    #         self.episode_log_probs.append(log_prob)
-    #         self.episode_values.append(value)
-    #         self.episode_dones.append(done)
-    #
-    #         total_reward += reward
-    #         total_entropy += entropy_diff
-    #         total_probs += prob_diff
-    #
-    #         if done:
-    #             break
-    #
-    #     # Final step handling
-    #     act = 'e'
-    #     agent2_action = self.env.actions.index(act)
-    #     final_state = self.env.next_state_sampler(state, act)
-    #     final_state_tensor = self.encode_state(final_state)
-    #     s_final = self.env.states.index(final_state)
-    #     obs_final = self.env.observation_function_sampler(final_state, act)
-    #     final_log_prob = torch.tensor(0.0).to(self.device)
-    #
-    #     self.episode_as.append(agent2_action)
-    #     self.episode_obs.append(obs_final)
-    #
-    #     entropy_diff, prob_diff = info_rewards.reward_function(self.episode_obs, self.episode_as)
-    #     final_reward = entropy_diff - alpha * prob_diff
-    #
-    #     final_value = self.critic(final_state_tensor)
-    #
-    #     self.episode_states.append(final_state)
-    #     self.episode_ss.append(s_final)
-    #     self.episode_rewards.append(final_reward)
-    #     self.episode_values.append(final_value)
-    #     self.episode_log_probs.append(final_log_prob)
-    #     self.episode_dones.append(True)
-    #
-    #     total_reward += final_reward
-    #     total_entropy += entropy_diff
-    #     total_probs += prob_diff
-    #
-    #     # Update networks
-    #     actor_loss, critic_loss, entropy_loss = self.update_networks()
-    #
-    #     return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss
 
     def train_episode(self, max_steps=20, alpha=0.5):
         """Train for one episode with improved stability"""

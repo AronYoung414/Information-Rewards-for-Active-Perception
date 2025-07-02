@@ -31,7 +31,8 @@ class POMDP:
         # Define UAV with sensors
         self.obs_noise = 0.1  # the noise of sensors
         # Define observations
-        self.observations = grid_world.gr_states + ['n']
+        self.observations = [(gr_st, uav_st) for gr_st, uav_st in
+                       product((grid_world.gr_states + ['n']), grid_world.uav_states)]
         self.obs_dict = self.get_observation_dictionary()
         self.emiss = self.get_emission_function()
         self.check_emission_function()
@@ -88,9 +89,9 @@ class POMDP:
             obs_dict[st] = {}
             for act in self.actions:
                 if grid_world.neighbor[st[0]][st[1]]:
-                    obs_dict[st][act] = [st[0], 'n']
+                    obs_dict[st][act] = [(st[0], st[1]), ('n', st[1])]
                 else:
-                    obs_dict[st][act] = ['n']
+                    obs_dict[st][act] = [('n', st[1])]
         return obs_dict
 
     def get_emission_function(self):
@@ -102,7 +103,7 @@ class POMDP:
                 for obs in self.observations:
                     if obs in self.obs_dict[st][act]:
                         if grid_world.neighbor[st[0]][st[1]]:
-                            if st[0] == obs:
+                            if st[0] == obs[0]:
                                 emiss[st][act][obs] = 1 - self.obs_noise
                             else:
                                 emiss[st][act][obs] = self.obs_noise

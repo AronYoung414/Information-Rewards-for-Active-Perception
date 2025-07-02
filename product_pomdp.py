@@ -41,7 +41,7 @@ class prod_pomdp:
         # Define UAV with sensors
         self.obs_noise = self.pomdp.obs_noise  # the noise of sensors
         # Define observations
-        self.observations = self.pomdp.observations
+        self.observations = self.pomdp.observations + [('n', 'n')]
         self.obs_dict = self.get_observation_dictionary()
         self.emiss = self.get_emission_function()
         self.check_emission_function()
@@ -108,11 +108,11 @@ class prod_pomdp:
             obs_dict[st] = {}
             for act in self.pomdp.actions:
                 if st in self.sink_states:
-                    obs_dict[st][act] = ['n']
+                    obs_dict[st][act] = [('n', 'n')]
                 else:
                     obs_dict[st][act] = self.pomdp.obs_dict[st[0]][act]
             act = 'e'
-            obs_dict[st][act] = ['n']
+            obs_dict[st][act] = [('n', 'n')]
         return obs_dict
 
     def get_emission_function(self):
@@ -144,8 +144,8 @@ class prod_pomdp:
                 prob = 0
                 for obs in self.observations:
                     prob += self.emiss[st][act][obs]
-                if prob != 1:
-                    print("The transition is invalid.")
+                if abs(prob - 1) > 0.01:
+                    print("The emission is invalid.", st, act)
         return 0
 
     def get_initial_distribution(self):
