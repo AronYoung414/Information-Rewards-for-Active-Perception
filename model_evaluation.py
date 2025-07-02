@@ -10,7 +10,7 @@ def evaluate_model_entropy(model_path, env, info_rewards, num_episodes=100, max_
     Args:
         model_path: Path to the saved .pth model file
         env: Environment instance (prod_pomdp)
-        info_rewards: InformationRewards instance
+        info_rewards: particle_filter instance
         num_episodes: Number of episodes to evaluate
         max_steps: Maximum steps per episode
 

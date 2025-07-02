@@ -2,7 +2,7 @@ from itertools import product
 from random import choices
 
 import numpy as np
-from POMDP import POMDP
+from pomdp_grid import POMDP
 from DFA import DFA
 
 
@@ -10,6 +10,8 @@ class prod_pomdp:
 
     def __init__(self):
         # The width and height of the grid world
+        self.width = 6
+        self.height = 6
         self.pomdp = POMDP()
         self.dfa = DFA()
         # Define states

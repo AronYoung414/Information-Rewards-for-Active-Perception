@@ -8,9 +8,8 @@ from collections import deque
 import random
 
 from product_pomdp import prod_pomdp
-from information_rewards import InformationRewards
-
-info_rewards = InformationRewards()
+# from information_rewards import particle_filter
+from particle_filter_estimation import particle_filter
 
 
 class ActorNetwork(nn.Module):
@@ -89,7 +88,7 @@ class Agent2ActorCritic:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.state_size = 4
+        self.state_size = 6  # 6 features
         self.observation_length = T
 
         # Initialize networks with improved architecture
@@ -167,43 +166,64 @@ class Agent2ActorCritic:
         return advantages
 
     def encode_state(self, state):
-        # Same as original implementation
         if state in self.env.sink_states:
             if state == 'sink1':
-                state_vector = np.array([-1 / 6, -1 / 6, 0, 0])
+                state_vector = np.array([-1, -1, 0, 0, 0, 0])  # [agent1_x, agent1_y, agent2_x, agent2_y, type, auto_st]
             elif state == 'sink2':
-                state_vector = np.array([-2 / 6, -2 / 6, 0, 0])
+                state_vector = np.array([0, 0, -1, -1, 0, 0])
             else:
-                state_vector = np.array([-3 / 6, -3 / 6, 0, 0])
+                state_vector = np.array([-1, -1, -1, -1, 0, 0])
         else:
             agent1_pos = state[0][0]
             agent2_pos = state[0][1]
             type = state[0][2]
             auto_st = state[1]
-            agent1_norm = float(agent1_pos) / 6
-            agent2_norm = float(agent2_pos) / 6
-            state_vector = np.array([agent1_norm, agent2_norm, type, auto_st])
+            agent1_norm = np.array(agent1_pos) / np.array([self.env.width - 1, self.env.height - 1])
+            agent2_norm = np.array(agent2_pos) / np.array([self.env.width - 1, self.env.height - 1])
+
+            # Flatten into a single 1D array
+            state_vector = np.concatenate([agent1_norm, agent2_norm, [type, auto_st]])
 
         return torch.FloatTensor(state_vector).to(self.device)
 
     def encode_observation(self, obs):
-        # Same as original implementation
+        """Encode observation consistently"""
         if obs is None:
-            return 0.0
-        obs_mapping = {'0': 0.0, '1': 1.0, '2': 2.0, '3': 3.0, '4': 4.0, '5': 5.0, 'n': 6.0}
-        return obs_mapping.get(obs, 0.0)
+            return np.array([0.0, 0.0])  # Return array instead of scalar
+
+        obs_mapping = {}
+        for obs_key in self.env.observations:
+            if obs_key == 'n':
+                obs_mapping[obs_key] = np.array([-1.0, -1.0])
+            else:
+                obs_mapping[obs_key] = np.array(obs_key) / np.array([self.env.width - 1, self.env.height - 1])
+
+        return obs_mapping.get(obs, np.array([0.0, 0.0]))  # Return array instead of scalar
 
     def prepare_observation_sequence(self, episode_obs, max_length=None):
-        # Same as original implementation
+        """Prepare observation sequence for neural network input"""
         if max_length is None:
             max_length = self.observation_length
 
-        encoded_obs = [self.encode_observation(obs) for obs in episode_obs]
+        encoded_obs = []
+        for obs in episode_obs:
+            encoded_obs_item = self.encode_observation(obs)
+            encoded_obs.append(encoded_obs_item)
 
-        if len(encoded_obs) < max_length:
-            padded_obs = [0.0] * (max_length - len(encoded_obs)) + encoded_obs
+        # Convert everything to a flat list of scalars
+        flattened_obs = []
+        for encoded_obs_item in encoded_obs:
+            if isinstance(encoded_obs_item, np.ndarray):
+                flattened_obs.extend(encoded_obs_item.flatten().tolist())
+            else:
+                # If it's a scalar (like 0.0), convert to a list
+                flattened_obs.append(float(encoded_obs_item))
+
+        # Pad or truncate to match expected length
+        if len(flattened_obs) < max_length:
+            padded_obs = [0.0] * (max_length - len(flattened_obs)) + flattened_obs
         else:
-            padded_obs = encoded_obs[-max_length:]
+            padded_obs = flattened_obs[-max_length:]
 
         return torch.FloatTensor(padded_obs).to(self.device)
 
@@ -340,18 +360,104 @@ class Agent2ActorCritic:
 
         return total_actor_loss / num_updates, total_critic_loss / num_updates, entropy_loss.item()
 
-    def train_episode(self, max_steps=20, alpha=1):
+    # def train_episode(self, max_steps=20, alpha=1):
+    #     """Train for one episode with improved stability"""
+    #     total_reward = 0
+    #     total_entropy = 0
+    #     total_probs = 0
+    #
+    #     state = random.choices(self.env.initial_states, self.env.initial_dist_sampling, k=1)[0]
+    #     self.episode_states.append(state)
+    #     s = self.env.states.index(state)
+    #     self.episode_ss.append(s)
+    #
+    #     for step in range(max_steps):
+    #         state_tensor = self.encode_state(state)
+    #         value = self.critic(state_tensor)
+    #
+    #         obs_sequence = self.prepare_observation_sequence(self.episode_obs)
+    #         agent2_action, log_prob, entropy = self.select_action(obs_sequence, training=True)
+    #         act = self.env.actions[agent2_action]
+    #         self.episode_as.append(agent2_action)
+    #
+    #         obs = self.env.observation_function_sampler(state, act)
+    #         self.episode_obs.append(obs)
+    #
+    #         state = self.env.next_state_sampler(state, act)
+    #         s = self.env.states.index(state)
+    #
+    #         entropy_diff, prob_diff = info_rewards.reward_function(self.episode_obs, self.episode_as)
+    #         reward = entropy_diff - alpha * prob_diff
+    #
+    #         # Check if episode should terminate
+    #         done = state in self.env.sink_states
+    #
+    #         self.episode_states.append(state)
+    #         self.episode_ss.append(s)
+    #         self.episode_actions.append(act)
+    #         self.episode_rewards.append(reward)
+    #         self.episode_log_probs.append(log_prob)
+    #         self.episode_values.append(value)
+    #         self.episode_dones.append(done)
+    #
+    #         total_reward += reward
+    #         total_entropy += entropy_diff
+    #         total_probs += prob_diff
+    #
+    #         if done:
+    #             break
+    #
+    #     # Final step handling
+    #     act = 'e'
+    #     agent2_action = self.env.actions.index(act)
+    #     final_state = self.env.next_state_sampler(state, act)
+    #     final_state_tensor = self.encode_state(final_state)
+    #     s_final = self.env.states.index(final_state)
+    #     obs_final = self.env.observation_function_sampler(final_state, act)
+    #     final_log_prob = torch.tensor(0.0).to(self.device)
+    #
+    #     self.episode_as.append(agent2_action)
+    #     self.episode_obs.append(obs_final)
+    #
+    #     entropy_diff, prob_diff = info_rewards.reward_function(self.episode_obs, self.episode_as)
+    #     final_reward = entropy_diff - alpha * prob_diff
+    #
+    #     final_value = self.critic(final_state_tensor)
+    #
+    #     self.episode_states.append(final_state)
+    #     self.episode_ss.append(s_final)
+    #     self.episode_rewards.append(final_reward)
+    #     self.episode_values.append(final_value)
+    #     self.episode_log_probs.append(final_log_prob)
+    #     self.episode_dones.append(True)
+    #
+    #     total_reward += final_reward
+    #     total_entropy += entropy_diff
+    #     total_probs += prob_diff
+    #
+    #     # Update networks
+    #     actor_loss, critic_loss, entropy_loss = self.update_networks()
+    #
+    #     return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss
+
+    def train_episode(self, max_steps=20, alpha=0.5):
         """Train for one episode with improved stability"""
+        # Initialize total reward, entropy and reaching probability
         total_reward = 0
         total_entropy = 0
         total_probs = 0
+        # Initialize the value of current entropy and reaching probability
+        entropy_now = 0
+        p_wT1_now = 0
 
         state = random.choices(self.env.initial_states, self.env.initial_dist_sampling, k=1)[0]
         self.episode_states.append(state)
         s = self.env.states.index(state)
         self.episode_ss.append(s)
 
-        for step in range(max_steps):
+        pf = particle_filter(self.env, state, num_particles=1000)
+
+        for step in range(max_steps - 1):
             state_tensor = self.encode_state(state)
             value = self.critic(state_tensor)
 
@@ -365,12 +471,19 @@ class Agent2ActorCritic:
 
             state = self.env.next_state_sampler(state, act)
             s = self.env.states.index(state)
-
-            entropy_diff, prob_diff = info_rewards.reward_function(self.episode_obs, self.episode_as)
+            # Calculate entropy and probability difference
+            entropy_before = entropy_now
+            p_wT1_before = p_wT1_now
+            entropy_now, p_wT1_now = pf.calculate_entropy(obs, act)
+            # entropy difference
+            entropy_diff = entropy_before - entropy_now
+            # probability difference
+            prob_diff = p_wT1_before - p_wT1_now
+            # obtain rewards
             reward = entropy_diff - alpha * prob_diff
 
             # Check if episode should terminate
-            done = state in self.env.sink_states
+            #done = state in self.env.sink_states
 
             self.episode_states.append(state)
             self.episode_ss.append(s)
@@ -378,45 +491,56 @@ class Agent2ActorCritic:
             self.episode_rewards.append(reward)
             self.episode_log_probs.append(log_prob)
             self.episode_values.append(value)
-            self.episode_dones.append(done)
+            self.episode_dones.append(False)
 
             total_reward += reward
             total_entropy += entropy_diff
             total_probs += prob_diff
 
-            if done:
-                break
+            #if done:
+               # break
 
         # Final step handling
-        act = 'e'
-        agent2_action = self.env.actions.index(act)
-        final_state = self.env.next_state_sampler(state, act)
+        final_act = 'e'
+        agent2_action = self.env.actions.index(final_act)
+        final_state = self.env.next_state_sampler(state, final_act)
         final_state_tensor = self.encode_state(final_state)
-        s_final = self.env.states.index(final_state)
-        obs_final = self.env.observation_function_sampler(final_state, act)
+        final_s = self.env.states.index(final_state)
+        final_obs = self.env.observation_function_sampler(final_state, final_act)
         final_log_prob = torch.tensor(0.0).to(self.device)
 
         self.episode_as.append(agent2_action)
-        self.episode_obs.append(obs_final)
+        self.episode_obs.append(final_obs)
 
-        entropy_diff, prob_diff = info_rewards.reward_function(self.episode_obs, self.episode_as)
+        entropy_before = entropy_now
+        p_wT1_before = p_wT1_now
+        entropy_now, p_wT1_now = pf.calculate_entropy(final_obs, final_act)
+        # entropy difference
+        entropy_diff = entropy_before - entropy_now
+        # probability difference
+        prob_diff = p_wT1_before - p_wT1_now
+        # obtain rewards
         final_reward = entropy_diff - alpha * prob_diff
 
         final_value = self.critic(final_state_tensor)
 
         self.episode_states.append(final_state)
-        self.episode_ss.append(s_final)
+        self.episode_ss.append(final_s)
         self.episode_rewards.append(final_reward)
         self.episode_values.append(final_value)
         self.episode_log_probs.append(final_log_prob)
         self.episode_dones.append(True)
 
+        #print(self.episode_obs)
+
         total_reward += final_reward
         total_entropy += entropy_diff
         total_probs += prob_diff
+        #print(total_entropy)
 
         # Update networks
         actor_loss, critic_loss, entropy_loss = self.update_networks()
+
 
         return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss
 
@@ -477,7 +601,7 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
 
 
 def visualize_training_results(episode_rewards, episode_entropies, episode_probs, actor_losses, critic_losses,
-                               window=50):
+                               ex_num, window=50):
     """Visualize training progress with moving averages"""
     import matplotlib.pyplot as plt
     import numpy as np
@@ -559,6 +683,7 @@ def visualize_training_results(episode_rewards, episode_entropies, episode_probs
         ax4.legend()
 
     plt.tight_layout()
+    plt.savefig(f'./ac_data/result_{ex_num}.png')
     plt.show()
 
 
@@ -584,6 +709,7 @@ def save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num=1):
 def main():
     # Create environment
     env = prod_pomdp()
+    ex_num = 9
 
     # Compute optimal policy for agent_1
     # print("Computing agent_1's optimal policy...")
@@ -592,10 +718,10 @@ def main():
     # Train agent_2
     print("Training agent_2 with entropy minimization rewards...")
     agent2, rewards, entropies, probs, actor_losses, critic_losses = train_agent2_actor_critic(
-        env, num_episodes=100000)
+        env, num_episodes=10000)
 
     # Save the data
-    save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num=2)
+    save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num)
 
     # Final evaluation
     # print("\nFinal evaluation:")
@@ -605,7 +731,7 @@ def main():
 
     # Visualize results
     print("Generating training plots...")
-    visualize_training_results(rewards, entropies, probs, actor_losses, critic_losses, window=200)
+    visualize_training_results(rewards, entropies, probs, actor_losses, critic_losses, ex_num, window=50)
 
     # Save trained model
     torch.save({

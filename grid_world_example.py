@@ -55,8 +55,8 @@ class Environment:
         for gr_st in self.gr_states:
             neigh[gr_st] = {}
             for uav_st in self.uav_states:
-                dist = np.sqrt((gr_st[0] - uav_st[0])**2 + (gr_st[1] - uav_st[1])**2)
-                if 2 > dist >= 0:
+                dist = np.sqrt((gr_st[0] - uav_st[0]) ** 2 + (gr_st[1] - uav_st[1]) ** 2)
+                if 4 > dist >= 0:
                     neigh[gr_st][uav_st] = True
                 else:
                     neigh[gr_st][uav_st] = False
@@ -72,7 +72,6 @@ class Environment:
                 else:
                     rewards[st][act] = 0
         return rewards
-
 
     def complementary_actions(self, act):
         # Use to find out stochastic transitions, if it stays, no stochasticity, if other actions, return possible stochasticity directions.

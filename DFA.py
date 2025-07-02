@@ -1,4 +1,4 @@
-from POMDP import POMDP
+from pomdp_grid import POMDP
 
 
 class DFA:
