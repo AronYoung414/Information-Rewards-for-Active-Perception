@@ -633,7 +633,7 @@ def save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num=1):
 def main():
     # Create environment
     env = prod_pomdp()
-    ex_num = 9
+    ex_num = 10
 
     # Compute optimal policy for agent_1
     # print("Computing agent_1's optimal policy...")

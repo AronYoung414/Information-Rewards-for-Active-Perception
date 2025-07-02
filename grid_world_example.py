@@ -56,7 +56,7 @@ class Environment:
             neigh[gr_st] = {}
             for uav_st in self.uav_states:
                 dist = np.sqrt((gr_st[0] - uav_st[0]) ** 2 + (gr_st[1] - uav_st[1]) ** 2)
-                if 4 > dist >= 0:
+                if 2 > dist >= 0:
                     neigh[gr_st][uav_st] = True
                 else:
                     neigh[gr_st][uav_st] = False
