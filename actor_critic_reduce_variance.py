@@ -364,7 +364,7 @@ class Agent2ActorCritic:
 
         return total_actor_loss / num_updates, total_critic_loss / num_updates, entropy_loss.item()
 
-    def train_episode(self, max_steps=20, alpha=0.5):
+    def train_episode(self, max_steps=20, alpha=0):
         """Train for one episode with improved stability"""
         # Initialize total reward, entropy and reaching probability
         total_reward = 0
@@ -455,12 +455,14 @@ class Agent2ActorCritic:
         self.episode_log_probs.append(final_log_prob)
         self.episode_dones.append(True)
 
-        #print(self.episode_obs)
+        # print(self.episode_states)
+        # print(self.episode_obs)
 
         total_reward += final_reward
         total_entropy += entropy_diff
         total_probs += prob_diff
-        #print(total_entropy)
+        # print(total_entropy)
+        # print("#" * 200)
 
         # Update networks
         actor_loss, critic_loss, entropy_loss = self.update_networks()
@@ -633,7 +635,7 @@ def save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num=1):
 def main():
     # Create environment
     env = prod_pomdp()
-    ex_num = 10
+    ex_num = 11
 
     # Compute optimal policy for agent_1
     # print("Computing agent_1's optimal policy...")

@@ -164,6 +164,6 @@ class prod_pomdp:
     def observation_function_sampler(self, st, act):
         observation_set = self.obs_dict[st][act]
         if len(observation_set) == 1:
-            return self.observations[-1]
+            return observation_set[0]
         else:
             return choices(observation_set, [1 - self.obs_noise, self.obs_noise], k=1)[0]
