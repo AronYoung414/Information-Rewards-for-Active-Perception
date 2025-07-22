@@ -514,7 +514,7 @@ def main():
         'critic_state_dict': agent2.critic.state_dict(),
         'actor_optimizer_state_dict': agent2.actor_optimizer.state_dict(),
         'critic_optimizer_state_dict': agent2.critic_optimizer.state_dict(),
-    }, 'agent2_actor_critic_model.pth')
+    }, 'ac_data/agent2_actor_critic_model_13.pth')
 
     print("Training completed and model saved!")
 

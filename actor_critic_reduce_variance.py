@@ -73,7 +73,7 @@ class CriticNetwork(nn.Module):
 class Agent2ActorCritic:
     """Improved Deep Actor-Critic agent with variance reduction techniques"""
 
-    def __init__(self, env, T=10, lr_actor=0.0001, lr_critic=0.0003,
+    def __init__(self, env, T=15, lr_actor=0.0001, lr_critic=0.0003,
                  gamma=0.95, hidden_size=128, window_size=1000,
                  entropy_coeff=0.01, value_loss_coeff=0.5, max_grad_norm=0.5,
                  batch_size=32, use_gae=True, gae_lambda=0.95):
@@ -323,18 +323,28 @@ class Agent2ActorCritic:
 
         total_actor_loss = 0
         total_critic_loss = 0
+        total_actor_grad_norm = 0
+        total_critic_grad_norm = 0
 
-        for _ in range(num_updates):
+        for update_idx in range(num_updates):
             # Update actor
             self.actor_optimizer.zero_grad()
             actor_loss.backward(retain_graph=True)
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+
+            # ADD GRADIENT MONITORING HERE - ACTOR
+            actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+            total_actor_grad_norm += actor_grad_norm.item()
+
             self.actor_optimizer.step()
 
             # Update critic
             self.critic_optimizer.zero_grad()
             value_loss.backward(retain_graph=True)
-            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+
+            # ADD GRADIENT MONITORING HERE - CRITIC
+            critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+            total_critic_grad_norm += critic_grad_norm.item()
+
             self.critic_optimizer.step()
 
             total_actor_loss += actor_loss.item()
@@ -359,12 +369,20 @@ class Agent2ActorCritic:
         }
         self.replay_buffer.append(episode_data)
 
+        # Store gradient norms for monitoring
+        avg_actor_grad_norm = total_actor_grad_norm / num_updates
+        avg_critic_grad_norm = total_critic_grad_norm / num_updates
+
         # Clear episode data
         self.reset_episode_buffers()
 
-        return total_actor_loss / num_updates, total_critic_loss / num_updates, entropy_loss.item()
+        return (total_actor_loss / num_updates,
+                total_critic_loss / num_updates,
+                entropy_loss.item(),
+                avg_actor_grad_norm,
+                avg_critic_grad_norm)  # Return gradient norms too
 
-    def train_episode(self, max_steps=20, alpha=0):
+    def train_episode(self, alpha=1):
         """Train for one episode with improved stability"""
         # Initialize total reward, entropy and reaching probability
         total_reward = 0
@@ -373,6 +391,8 @@ class Agent2ActorCritic:
         # Initialize the value of current entropy and reaching probability
         entropy_now = 0
         p_wT1_now = 0
+        # The length of trajectory
+        max_steps = self.observation_length
 
         state = random.choices(self.env.initial_states, self.env.initial_dist_sampling, k=1)[0]
         self.episode_states.append(state)
@@ -465,10 +485,10 @@ class Agent2ActorCritic:
         # print("#" * 200)
 
         # Update networks
-        actor_loss, critic_loss, entropy_loss = self.update_networks()
+        actor_loss, critic_loss, entropy_loss, actor_grad_norm, critic_grad_norm = self.update_networks()
 
 
-        return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss
+        return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm
 
 
 def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
@@ -476,9 +496,9 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
 
     # Initialize agent with better hyperparameters
     agent2 = Agent2ActorCritic(
-        env,
-        lr_actor=0.0005,  # Lower learning rate
-        lr_critic=0.006,  # Lower learning rate
+        env, T=15,
+        lr_actor=0.0001,  # Lower learning rate
+        lr_critic=0.0003,  # Lower learning rate
         gamma=0.95,  # Slightly lower discount
         entropy_coeff=0.01,  # Entropy regularization
         use_gae=True,  # Use GAE
@@ -492,16 +512,18 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
     episode_lengths = []
     actor_losses = []
     critic_losses = []
+    actor_grad_norms = []
+    critic_grad_norms = []
 
     # For tracking moving average
     recent_rewards = deque(maxlen=window_size)
 
     print("Starting improved training...")
-    print("Episode | Reward | MA Reward | Length | Actor Loss | Critic Loss | Entropy | Probs")
-    print("-" * 85)
+    print("Episode | Reward | MA Reward | Length | Actor Loss | Critic Loss | Actor Grad | Critic Grad | Entropy | Probs")
+    print("-" * 105)
 
     for episode in range(num_episodes):
-        total_reward, total_entropy, total_probs, episode_length, actor_loss, critic_loss = agent2.train_episode()
+        total_reward, total_entropy, total_probs, episode_length, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm = agent2.train_episode()
 
         episode_rewards.append(total_reward)
         episode_entropies.append(-total_entropy)
@@ -513,6 +535,10 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
             actor_losses.append(actor_loss)
             critic_losses.append(critic_loss)
 
+        if actor_grad_norm is not None:
+            actor_grad_norms.append(actor_grad_norm)
+            critic_grad_norms.append(critic_grad_norm)
+
         moving_avg_reward = sum(recent_rewards) / len(recent_rewards)
 
         if episode % 50 == 0:
@@ -520,8 +546,10 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
             current_probs = episode_probs[-1]
             actor_loss_str = f"{actor_loss:10.4f}" if actor_loss is not None else "    None"
             critic_loss_str = f"{critic_loss:11.4f}" if critic_loss is not None else "     None"
+            actor_grad_norm_str = f"{actor_grad_norm:10.4f}" if actor_grad_norm is not None else "    None"
+            critic_grad_norm_str = f"{critic_grad_norm:11.4f}" if critic_grad_norm is not None else "     None"
             print(f"{episode:7d} | {total_reward:6.3f} | {moving_avg_reward:9.3f} | {episode_length:6d} | "
-                  f"{actor_loss_str} | {critic_loss_str} | {current_entropy:7.4f} | {current_probs:7.4f}")
+                  f"{actor_loss_str} | {critic_loss_str} | {actor_grad_norm_str}| {critic_grad_norm_str} | {current_entropy:7.4f} | {current_probs:7.4f}")
 
     return agent2, episode_rewards, episode_entropies, episode_probs, actor_losses, critic_losses
 
@@ -635,7 +663,7 @@ def save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num=1):
 def main():
     # Create environment
     env = prod_pomdp()
-    ex_num = 11
+    ex_num = 14
 
     # Compute optimal policy for agent_1
     # print("Computing agent_1's optimal policy...")
@@ -644,7 +672,7 @@ def main():
     # Train agent_2
     print("Training agent_2 with entropy minimization rewards...")
     agent2, rewards, entropies, probs, actor_losses, critic_losses = train_agent2_actor_critic(
-        env, num_episodes=10000)
+        env, num_episodes=20000)
 
     # Save the data
     save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num)
@@ -665,7 +693,7 @@ def main():
         'critic_state_dict': agent2.critic.state_dict(),
         'actor_optimizer_state_dict': agent2.actor_optimizer.state_dict(),
         'critic_optimizer_state_dict': agent2.critic_optimizer.state_dict(),
-    }, 'agent2_actor_critic_model.pth')
+    }, f'ac_data/agent2_actor_critic_model_{ex_num}.pth')
 
     print("Training completed and model saved!")
 

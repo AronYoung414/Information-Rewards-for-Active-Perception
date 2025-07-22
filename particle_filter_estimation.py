@@ -40,29 +40,78 @@ class particle_filter:
             new_particles.append(new_particle)
         self.particles = new_particles
 
+    # def update(self, observation, act):
+    #     """Update step: weight particles based on observation"""
+    #     total_weight = 0
+    #     for i, particle in enumerate(self.particles):
+    #         # Get expected observation for this particle
+    #         expected_obs = self.env.observation_function_sampler(particle, act)
+    #
+    #         # Calculate likelihood
+    #         if expected_obs == observation:
+    #             # Correct observation
+    #             self.weights[i] = self.sensor_accuracy
+    #         else:
+    #             # Incorrect observation
+    #             self.weights[i] = (1 - self.sensor_accuracy) / 10  # Small probability
+    #
+    #         total_weight += self.weights[i]
+    #
+    #
+    #     # Normalize weights
+    #     if total_weight > 0:
+    #         self.weights = [w / total_weight for w in self.weights]
+    #     else:
+    #         # If all weights are zero, reset to uniform
+    #         self.weights = [1.0 / self.num_particles] * self.num_particles
+
+    # def update(self, observation, act):
+    #     """Update step: weight particles based on observation using emission function"""
+    #
+    #     # Method 1: Direct application of emission function
+    #     for i, particle in enumerate(self.particles):
+    #         # Apply emission function directly
+    #         likelihood = self.env.emiss[particle][act][observation]
+    #
+    #         # Update weight: w_i = w_i * P(observation | particle_state)
+    #         self.weights[i] *= likelihood
+    #
+    #     # Normalize weights
+    #     total_weight = sum(self.weights)
+    #     if total_weight > 0:
+    #         self.weights = [w / total_weight for w in self.weights]
+    #     else:
+    #         # If all weights are zero, reset to uniform
+    #         # print("Warning: All particles have zero weight. Resetting to uniform distribution.")
+    #         self.weights = [1.0 / self.num_particles] * self.num_particles
+
     def update(self, observation, act):
-        """Update step: weight particles based on observation"""
-        total_weight = 0
+        """
+        Alternative update methods showing different ways to use emission function
+        """
 
+        # Method 2: Log-space computation (numerically stable)
+        log_weights = []
         for i, particle in enumerate(self.particles):
-            # Get expected observation for this particle
-            expected_obs = self.env.observation_function_sampler(particle, act)
+            # Compute log likelihood
+            likelihood = self.env.emiss[particle][act][observation]
 
-            # Calculate likelihood
-            if expected_obs == observation:
-                # Correct observation
-                self.weights[i] = self.sensor_accuracy
-            else:
-                # Incorrect observation
-                self.weights[i] = (1 - self.sensor_accuracy) / 10  # Small probability
+            # Avoid log(0) by adding small epsilon
+            epsilon = 1e-10
+            log_likelihood = np.log(likelihood + epsilon)
 
-            total_weight += self.weights[i]
+            # Update in log space: log(w_i) = log(w_i) + log(P(obs|state))
+            log_weight = np.log(self.weights[i] + epsilon) + log_likelihood
+            log_weights.append(log_weight)
 
-        # Normalize weights
+        # Convert back to linear space and normalize
+        max_log_weight = max(log_weights)
+        weights_unnormalized = [np.exp(lw - max_log_weight) for lw in log_weights]
+        total_weight = sum(weights_unnormalized)
+
         if total_weight > 0:
-            self.weights = [w / total_weight for w in self.weights]
+            self.weights = [w / total_weight for w in weights_unnormalized]
         else:
-            # If all weights are zero, reset to uniform
             self.weights = [1.0 / self.num_particles] * self.num_particles
 
     def get_effective_particles(self):
