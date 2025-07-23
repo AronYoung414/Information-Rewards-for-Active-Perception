@@ -3,9 +3,9 @@ from pomdp_grid import POMDP
 
 class DFA:
 
-    def __init__(self):
-        self.pomdp = POMDP()
+    def __init__(self, pomdp):
         # Define states
+        self.pomdp = pomdp
         self.states = [0, 1, 2, 3, 4]
         # Goals
         # self.goals1 = [0]

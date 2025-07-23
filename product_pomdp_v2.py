@@ -8,43 +8,37 @@ from DFA import DFA
 
 class prod_pomdp:
 
-    def __init__(self):
+    def __init__(self, pomdp, dfa, secret_dfa_states=[2,4], goal_dfa_states=[0,4]):
         # The width and height of the grid world
         self.width = 6
         self.height = 6
-        self.pomdp = POMDP()
-        self.dfa = DFA()
+        self.pomdp = pomdp
+        self.dfa = dfa
         # Define states
-        self.sink_states = ['sink1', 'sink2', 'sink3']
-        self.states = [(pomdp_st, dfa_st) for pomdp_st, dfa_st in
-                       product(self.pomdp.states, self.dfa.states)] + self.sink_states
-        self.state_indices = list(range(len(self.states)))
-        self.state_size = len(self.states)
         # # Goals
-        self.secret_states = ['sink2', 'sink3']
-        self.goal_states = ['sink1', 'sink3']
-        # self.goals1 = [(pomdp_st, dfa_st) for pomdp_st, dfa_st in product(pomdp.states, dfa.goals1)]
-        # self.goals2 = [(pomdp_st, dfa_st) for pomdp_st, dfa_st in product(pomdp.states, dfa.goals2)]
-        # Define initial state
+        self.secret_dfa_states = secret_dfa_states # states in the dfa.
+        self.goal_dfa_states = goal_dfa_states # states in the dfa
+        self.secret_states = set([])
+        self.goal_states = set([])
         self.initial_states= []
         for pomdp_initial_state in self.pomdp.initial_states:
             label = self.pomdp.label_func[pomdp_initial_state]
             label_idx= self.dfa.input_symbols.index(label)
             dfa_initial_state = self.dfa.transition[self.dfa.initial_state][label_idx]
             self.initial_states.append((pomdp_initial_state, dfa_initial_state))
-        self.initial_dist = self.get_initial_distribution()
-        self.initial_dist_sampling = [1 / len(self.initial_states) for initial_state in self.pomdp.initial_states]
         # Define actions
-        self.actions = self.pomdp.actions + ['e']
+        self.actions = self.pomdp.actions
         self.selectable_actions = self.pomdp.actions
         self.action_size = len(self.actions)
         self.action_indices = list(range(len(self.actions)))
         # transition probability dictionary
-        self.next_supp = self.get_next_supp_with_action()
-        self.transition = self.get_transition()
+        self.get_transition_incremental()
         self.check_the_transition()
         # Define UAV with sensors
         self.obs_noise = self.pomdp.obs_noise  # the noise of sensors
+        self.state_size= len(self.states)
+        self.initial_dist = self.get_initial_distribution()
+        self.initial_dist_sampling = [1 / len(self.initial_states) for initial_state in self.pomdp.initial_states]
         # Define observations
         self.observations = self.pomdp.observations + [('n', 'n')]
         self.obs_dict = self.get_observation_dictionary()
@@ -56,9 +50,7 @@ class prod_pomdp:
         for st in self.states:
             next_supp[st] = {}
             for act in self.pomdp.actions:
-                if st in self.sink_states:
-                    next_supp[st][act] = [st]  # sink states are absorbing states
-                elif st[1] == 0:
+                if st[1] == 0:
                     next_supp[st][act] = ['sink1']  # UAV reaches the goal (nominal agent)
                 elif st[1] == 4:
                     next_supp[st][act] = ['sink3']  # adversary is captured (adversary)
@@ -69,34 +61,37 @@ class prod_pomdp:
                         dfa_st_prime = self.dfa.transition[st[1]][input_index]
                         next_supp[st][act].append((pomdp_st_prime, dfa_st_prime))
             # discuss the situation of ending action separately
-            act = 'e'
-            if st[1] == 2:
-                next_supp[st][act] = ['sink2']  # adversary is not captured (adversary)
-            else:
-                next_supp[st][act] = [st]
         return next_supp
 
-    def get_transition(self):
+    def get_transition_incremental(self):
+        states = self.initial_states
+        pointer = 0
         trans = {}
-        for st in self.states:
+        supp = {}
+        while pointer < len(states):
+            st = states[pointer]
+            if st[1] in self.secret_dfa_states:
+                self.secret_states.add(st)
+            if st[1] in self.goal_dfa_states:
+                self.goal_states.add(st)
             trans[st] = {}
+            supp[st] = {}
+            pointer += 1
             for act in self.pomdp.actions:
                 trans[st][act] = {}
-                for st_prime in self.next_supp[st][act]:
-                    if st in self.sink_states:
-                        trans[st][act][st_prime] = 1
-                    elif st[1] == 0:
-                        trans[st][act][st_prime] = 1
-                    elif st[1] == 4:
-                        trans[st][act][st_prime] = 1
-                    else:
-                        trans[st][act][st_prime] = self.pomdp.transition[st[0]][act][st_prime[0]]
-            # discuss the situation of ending action separately
-            act = 'e'
-            trans[st][act] = {}
-            for st_prime in self.next_supp[st][act]:
-                trans[st][act][st_prime] = 1
-        return trans
+                supp[st][act] = set()
+                for s_prime in self.pomdp.next_supp[st[0]][act]: # all reachable states in the pomdp.
+                    input_index = self.dfa.input_symbols.index(self.pomdp.label_func[st[0]])
+                    dfa_st_prime = self.dfa.transition[st[1]][input_index]
+                    st_prime = (s_prime, dfa_st_prime)
+                    trans[st][act][st_prime] = self.pomdp.transition[st[0]][act][s_prime]
+                    if st_prime not in states:
+                        states.append(st_prime)
+                    supp[st][act].add(st_prime)
+        self.states = states
+        self.transition = trans
+        self.next_supp = supp
+        return
 
     def check_the_transition(self):
         for st in self.states:
@@ -113,12 +108,7 @@ class prod_pomdp:
         for st in self.states:
             obs_dict[st] = {}
             for act in self.pomdp.actions:
-                if st in self.sink_states:
-                    obs_dict[st][act] = [('n', 'n')]
-                else:
-                    obs_dict[st][act] = self.pomdp.obs_dict[st[0]][act]
-            act = 'e'
-            obs_dict[st][act] = [('n', 'n')]
+                obs_dict[st][act] = self.pomdp.obs_dict[st[0]][act]
         return obs_dict
 
     def get_emission_function(self):
@@ -129,19 +119,9 @@ class prod_pomdp:
                 emiss[st][act] = {}
                 for obs in self.observations:
                     if obs in self.obs_dict[st][act]:
-                        if st in self.sink_states:
-                            emiss[st][act][obs] = 1
-                        else:
-                            emiss[st][act][obs] = self.pomdp.emiss[st[0]][act][obs]
+                        emiss[st][act][obs] = self.pomdp.emiss[st[0]][act][obs]
                     else:
                         emiss[st][act][obs] = 0
-            act = 'e'
-            emiss[st][act] = {}
-            for obs in self.observations:
-                if obs in self.obs_dict[st][act]:
-                    emiss[st][act][obs] = 1
-                else:
-                    emiss[st][act][obs] = 0
         return emiss
 
     def check_emission_function(self):
@@ -162,7 +142,7 @@ class prod_pomdp:
         return mu_0
 
     def next_state_sampler(self, st, act):
-        next_supp = self.next_supp[st][act]
+        next_supp = list(self.next_supp[st][act])
         next_prob = [self.transition[st][act][st_prime] for st_prime in next_supp]
         next_state = choices(next_supp, next_prob, k=1)[0]
         return next_state

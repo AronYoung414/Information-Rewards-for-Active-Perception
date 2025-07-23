@@ -89,7 +89,7 @@ class POMDP:
             obs_dict[st] = {}
             for act in self.actions:
                 if grid_world.neighbor[st[0]][st[1]]:
-                    obs_dict[st][act] = [(st[0], st[1]), ('n', st[1])]
+                    obs_dict[st][act] = [(st[0], st[1]), ('n', st[1])] #  observation with detection and non detection.
                 else:
                     obs_dict[st][act] = [('n', st[1])]
         return obs_dict
@@ -99,19 +99,33 @@ class POMDP:
         for st in self.states:
             emiss[st] = {}
             for act in self.actions:
-                emiss[st][act] = {}
-                for obs in self.observations:
-                    if obs in self.obs_dict[st][act]:
-                        if grid_world.neighbor[st[0]][st[1]]:
-                            if st[0] == obs[0]:
-                                emiss[st][act][obs] = 1 - self.obs_noise
-                            else:
-                                emiss[st][act][obs] = self.obs_noise
-                        else:
-                            emiss[st][act][obs] = 1
-                    else:
-                        emiss[st][act][obs] = 0
+                emiss[st][act] = {obs: 0 for obs in self.observations}  # Initialize all observations to 0
+                obs_possible =  self.obs_dict[st][act]
+                if grid_world.neighbor[st[0]][st[1]]:
+
+                    emiss[st][act][obs_possible[0]] = 1 - self.obs_noise # JF: modified observation
+                    emiss[st][act][obs_possible[1]] = self.obs_noise
+                else:
+                    emiss[st][act][obs_possible[0]] = 1
         return emiss
+    # def get_emission_function(self):
+    #     emiss = {}
+    #     for st in self.states:
+    #         emiss[st] = {}
+    #         for act in self.actions:
+    #             emiss[st][act] = {}
+    #             for obs in self.observations:
+    #                 if obs in self.obs_dict[st][act]:
+    #                     if grid_world.neighbor[st[0]][st[1]]:
+    #                         if st[0] == obs[0]:
+    #                             emiss[st][act][obs] = 1 - self.obs_noise # JF: modified observation
+    #                         else:
+    #                             emiss[st][act][obs] = self.obs_noise
+    #                     else:
+    #                         emiss[st][act][obs] = 1
+    #                 else:
+    #                     emiss[st][act][obs] = 0
+    #     return emiss
 
     def check_emission_function(self):
         for st in self.states:
@@ -119,7 +133,7 @@ class POMDP:
                 prob = 0
                 for obs in self.observations:
                     prob += self.emiss[st][act][obs]
-                if abs(prob - 1) > 0.01:
+                if abs(prob - 1) > 0.01: # check if the sum of probabilities is one.
                     print("The emission is invalid.", self.emiss[st][act])
         return 0
 
@@ -127,10 +141,10 @@ class POMDP:
         lab = {}
         for st in self.states:
             lab[st] = []
-            if st[2] == 1:
+            if st[2] == 1: # adversary
                 lab[st] += self.atom_prop[0]
-            if st[1] in grid_world.uav_goal:
+            if st[1] in grid_world.uav_goal: # reaching goal
                 lab[st] += self.atom_prop[1]
-            if st[0] == st[1]:
+            if st[0] == st[1]: # capture
                 lab[st] += self.atom_prop[2]
         return lab

@@ -6,10 +6,11 @@ import torch.nn.functional as F
 import numpy as np
 from collections import deque
 import random
-
-from product_pomdp import prod_pomdp
+from pomdp_grid import POMDP
+from DFA import DFA
+from product_pomdp_v2 import prod_pomdp
 # from information_rewards import particle_filter
-from particle_filter_estimation import particle_filter
+from particle_filter_estimation_v2 import particle_filter
 
 
 class ActorNetwork(nn.Module):
@@ -166,24 +167,14 @@ class Agent2ActorCritic:
         return advantages
 
     def encode_state(self, state):
-        if state in self.env.sink_states:
-            if state == 'sink1':
-                state_vector = np.array([-1, -1, 0, 0, 0, 0])  # [agent1_x, agent1_y, agent2_x, agent2_y, type, auto_st]
-            elif state == 'sink2':
-                state_vector = np.array([0, 0, -1, -1, 0, 0])
-            else:
-                state_vector = np.array([-1, -1, -1, -1, 0, 0])
-        else:
-            agent1_pos = state[0][0]
-            agent2_pos = state[0][1]
-            type = state[0][2]
-            auto_st = state[1]
-            agent1_norm = np.array(agent1_pos) / np.array([self.env.width - 1, self.env.height - 1])
-            agent2_norm = np.array(agent2_pos) / np.array([self.env.width - 1, self.env.height - 1])
-
+        agent1_pos = state[0][0]
+        agent2_pos = state[0][1]
+        type = state[0][2]
+        auto_st = state[1]
+        agent1_norm = np.array(agent1_pos) / np.array([self.env.width - 1, self.env.height - 1])
+        agent2_norm = np.array(agent2_pos) / np.array([self.env.width - 1, self.env.height - 1])
             # Flatten into a single 1D array
-            state_vector = np.concatenate([agent1_norm, agent2_norm, [type, auto_st]])
-
+        state_vector = np.concatenate([agent1_norm, agent2_norm, [type, auto_st]])
         return torch.FloatTensor(state_vector).to(self.device)
 
     def encode_observation(self, obs):
@@ -250,6 +241,28 @@ class Agent2ActorCritic:
         entropy = dist.entropy()
 
         return action.item(), log_prob, entropy
+
+    def update_actor_network(self):
+        """Update actor network with improved loss calculation"""
+        if len(self.episode_rewards) == 0:
+            return
+
+        # Convert to tensors
+        rewards = torch.FloatTensor(self.episode_rewards).to(self.device)
+        log_probs = torch.stack(self.episode_log_probs)
+        advantages = self.compute_gae()
+
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # Calculate actor loss
+        actor_loss = -(log_probs * advantages).mean()
+
+        # Update actor network
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+        return actor_loss.item(), advantages.mean().item()
 
     def update_networks(self):
         """Improved network updates with multiple techniques"""
@@ -389,19 +402,20 @@ class Agent2ActorCritic:
         total_entropy = 0
         total_probs = 0
         # Initialize the value of current entropy and reaching probability
-        entropy_now = 0
+        entropy_now = 1
         p_wT1_now = 0
         # The length of trajectory
         max_steps = self.observation_length
 
-        state = random.choices(self.env.initial_states, self.env.initial_dist_sampling, k=1)[0]
+        state = random.choices(self.env.initial_states, k=1)[0]
         self.episode_states.append(state)
         s = self.env.states.index(state)
         self.episode_ss.append(s)
 
-        pf = particle_filter(self.env, state, num_particles=200)
+        pf = particle_filter(self.env, state, num_particles=100)
+        
 
-        for step in range(max_steps - 1):
+        for step in range(max_steps):
             state_tensor = self.encode_state(state)
             value = self.critic(state_tensor)
 
@@ -415,73 +429,32 @@ class Agent2ActorCritic:
 
             state = self.env.next_state_sampler(state, act)
             s = self.env.states.index(state)
-            # Calculate entropy and probability difference
-            entropy_before = entropy_now
-            p_wT1_before = p_wT1_now
-            entropy_now, p_wT1_now = pf.calculate_entropy(obs, act)
-            # entropy difference
-            entropy_diff = entropy_before - entropy_now
-            # probability difference
-            prob_diff = p_wT1_before - p_wT1_now
-            # obtain rewards
-            reward = entropy_diff - alpha * prob_diff
-
-            # Check if episode should terminate
-            #done = state in self.env.sink_states
 
             self.episode_states.append(state)
             self.episode_ss.append(s)
             self.episode_actions.append(act)
-            self.episode_rewards.append(reward)
             self.episode_log_probs.append(log_prob)
             self.episode_values.append(value)
             self.episode_dones.append(False)
-
-            total_reward += reward
-            total_entropy += entropy_diff
-            total_probs += prob_diff
-
+            self.episode_rewards.append(0)  # Placeholder for rewards
             #if done:
                # break
 
-        # Final step handling
-        final_act = 'e'
-        agent2_action = self.env.actions.index(final_act)
-        final_state = self.env.next_state_sampler(state, final_act)
-        final_state_tensor = self.encode_state(final_state)
-        final_s = self.env.states.index(final_state)
-        final_obs = self.env.observation_function_sampler(final_state, final_act)
-        final_log_prob = torch.tensor(0.0).to(self.device)
 
-        self.episode_as.append(agent2_action)
-        self.episode_obs.append(final_obs)
 
-        entropy_before = entropy_now
-        p_wT1_before = p_wT1_now
-        entropy_now, p_wT1_now = pf.calculate_entropy(final_obs, final_act)
-        # entropy difference
-        entropy_diff = entropy_before - entropy_now
-        # probability difference
-        prob_diff = p_wT1_before - p_wT1_now
+        entropy, p_success = pf.calculate_entropy_seq(self.episode_obs, self.episode_actions)
         # obtain rewards
-        final_reward = entropy_diff - alpha * prob_diff
+        final_reward = -entropy + alpha * p_success
 
-        final_value = self.critic(final_state_tensor)
-
-        self.episode_states.append(final_state)
-        self.episode_ss.append(final_s)
-        self.episode_rewards.append(final_reward)
-        self.episode_values.append(final_value)
-        self.episode_log_probs.append(final_log_prob)
-        self.episode_dones.append(True)
+        self.episode_rewards[-1] = final_reward
+        self.episode_dones[-1]= True
 
         # print(self.episode_states)
         # print(self.episode_obs)
-
-        total_reward += final_reward
-        total_entropy += entropy_diff
-        total_probs += prob_diff
-        # print(total_entropy)
+        total_probs = p_success
+        total_reward  = final_reward
+        total_entropy = entropy
+         # print(total_entropy)
         # print("#" * 200)
 
         # Update networks
@@ -490,13 +463,14 @@ class Agent2ActorCritic:
 
         return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm
 
+import time
 
 def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
     """Train agent_2 using improved actor-critic algorithm"""
 
     # Initialize agent with better hyperparameters
     agent2 = Agent2ActorCritic(
-        env, T=15,
+        env, T=20,
         lr_actor=0.0001,  # Lower learning rate
         lr_critic=0.0003,  # Lower learning rate
         gamma=0.95,  # Slightly lower discount
@@ -523,11 +497,11 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
     print("-" * 105)
 
     for episode in range(num_episodes):
-        total_reward, total_entropy, total_probs, episode_length, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm = agent2.train_episode()
+        total_reward, total_entropy, total_probs, episode_length, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm = agent2.train_episode(alpha=5)
 
         episode_rewards.append(total_reward)
-        episode_entropies.append(-total_entropy)
-        episode_probs.append(-total_probs)
+        episode_entropies.append(total_entropy)
+        episode_probs.append(total_probs)
         episode_lengths.append(episode_length)
         recent_rewards.append(total_reward)
 
@@ -659,21 +633,53 @@ def save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num=1):
 
     return 0
 
+import pickle
+
+import os
 
 def main():
     # Create environment
-    env = prod_pomdp()
+ 
     ex_num = 14
+    filename = f"env_experiment_{ex_num}.pkl"
+    if os.path.exists(filename):
+        print(f"Loading environment from {filename}...")
+        with open(filename, "rb") as f:
+            env = pickle.load(f)
+    else:
+        print("Pickle file not found. Creating and saving environment...")
+        pomdp = POMDP()
+        dfa = DFA(pomdp)
+        env = prod_pomdp(pomdp, dfa)
+        with open(filename, "wb") as f:
+            pickle.dump(env, f)
 
-    # Compute optimal policy for agent_1
-    # print("Computing agent_1's optimal policy...")
-    # _, agent1_policy = value_iteration(env)
-
+    # try:
+    #
+    #     else:
+    #         print("Pickle file not found. Creating and saving environment...")
+    #         pomdp = POMDP()
+    #         dfa = DFA()
+    #         env = prod_pomdp(pomdp, dfa)  # Define your environment here
+    #         with open(filename, "wb") as f:
+    #             pickle.dump(env, f)
+    #     print("Environment is ready.")
+    # except Exception as e:
+    #     print(f"Failed to load or create environment: {e}")
     # Train agent_2
-    print("Training agent_2 with entropy minimization rewards...")
+    start = time.perf_counter()
+    # pomdp = POMDP()
+    # dfa = DFA(pomdp)
+    # env = prod_pomdp(pomdp, dfa)  # Define your environment here
+
+    print("Environment is ready.")
+    print("Creating environment...", time.perf_counter() - start)
+    print("Training agent 2 with entropy minimization rewards...")
     agent2, rewards, entropies, probs, actor_losses, critic_losses = train_agent2_actor_critic(
         env, num_episodes=5000)
 
+    end = time.perf_counter()
+    print(f"Execution time: {end - start:.6f} seconds")
     # Save the data
     save_data(rewards, entropies, probs, actor_losses, critic_losses, ex_num)
 
