@@ -4,7 +4,7 @@ from random import choices
 import numpy as np
 from pomdp_grid import POMDP
 from DFA import DFA
-
+import copy
 
 class prod_pomdp:
 
@@ -38,7 +38,6 @@ class prod_pomdp:
         self.obs_noise = self.pomdp.obs_noise  # the noise of sensors
         self.state_size= len(self.states)
         self.initial_dist = self.get_initial_distribution()
-        self.initial_dist_sampling = [1 / len(self.initial_states) for initial_state in self.pomdp.initial_states]
         # Define observations
         self.observations = self.pomdp.observations + [('n', 'n')]
         self.obs_dict = self.get_observation_dictionary()
@@ -64,7 +63,7 @@ class prod_pomdp:
         return next_supp
 
     def get_transition_incremental(self):
-        states = self.initial_states
+        states = copy.deepcopy(self.initial_states)
         pointer = 0
         trans = {}
         supp = {}

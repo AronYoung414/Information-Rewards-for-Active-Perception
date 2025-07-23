@@ -442,7 +442,7 @@ class Agent2ActorCritic:
 
 
 
-        entropy, p_success = pf.calculate_entropy_seq(self.episode_obs, self.episode_actions)
+        entropy, p_success, identify_type = pf.calculate_entropy_seq(self.episode_obs, self.episode_actions)
         # obtain rewards
         final_reward = -entropy + alpha * p_success
 
@@ -461,7 +461,7 @@ class Agent2ActorCritic:
         actor_loss, critic_loss, entropy_loss, actor_grad_norm, critic_grad_norm = self.update_networks()
 
 
-        return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm
+        return total_reward, total_entropy, total_probs, step + 1, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm, identify_type
 
 import time
 
@@ -493,11 +493,11 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
     recent_rewards = deque(maxlen=window_size)
 
     print("Starting improved training...")
-    print("Episode | Reward | MA Reward | Length | Actor Loss | Critic Loss | Actor Grad | Critic Grad | Entropy | Probs")
+    print("Episode | Reward | MA Reward | Length | Actor Loss | Critic Loss | Actor Grad | Critic Grad | Entropy | Probs | Identify type")
     print("-" * 105)
 
     for episode in range(num_episodes):
-        total_reward, total_entropy, total_probs, episode_length, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm = agent2.train_episode(alpha=5)
+        total_reward, total_entropy, total_probs, episode_length, actor_loss, critic_loss, actor_grad_norm, critic_grad_norm, identify_type = agent2.train_episode(alpha=5)
 
         episode_rewards.append(total_reward)
         episode_entropies.append(total_entropy)
@@ -522,8 +522,9 @@ def train_agent2_actor_critic(env, num_episodes=1000, window_size=50):
             critic_loss_str = f"{critic_loss:11.4f}" if critic_loss is not None else "     None"
             actor_grad_norm_str = f"{actor_grad_norm:10.4f}" if actor_grad_norm is not None else "    None"
             critic_grad_norm_str = f"{critic_grad_norm:11.4f}" if critic_grad_norm is not None else "     None"
+            identify_type_str = str(identify_type)
             print(f"{episode:7d} | {total_reward:6.3f} | {moving_avg_reward:9.3f} | {episode_length:6d} | "
-                  f"{actor_loss_str} | {critic_loss_str} | {actor_grad_norm_str}| {critic_grad_norm_str} | {current_entropy:7.4f} | {current_probs:7.4f}")
+                  f"{actor_loss_str} | {critic_loss_str} | {actor_grad_norm_str}| {critic_grad_norm_str} | {current_entropy:7.4f} | {current_probs:7.4f}| {identify_type_str}")
 
     return agent2, episode_rewards, episode_entropies, episode_probs, actor_losses, critic_losses
 

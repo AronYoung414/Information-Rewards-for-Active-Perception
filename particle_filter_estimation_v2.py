@@ -16,6 +16,7 @@ class particle_filter:
         self.env = env
         # get the initial state
         self.true_state = initial_state
+        self.true_type =  initial_state[0][2]
         self.particles = []
         self.weights = []
         self.sensor_accuracy = sensor_accuracy
@@ -179,10 +180,16 @@ class particle_filter:
         temp_H_1 = p_zT1 * np.log2(p_zT1) if p_zT1 > 0 else 0
         temp_H_0 = p_zT0 * np.log2(p_zT0) if p_zT0 > 0 else 0
         H = - (temp_H_1 + temp_H_0)
+        identify_type = False
+        if p_zT1 > 0.5 and self.true_type == 1:  # in self.env.secret_states:
+            identify_type = True
+        elif p_zT0>0.5 and self.true_type ==0:
+            identify_type = True
+
         p_success = 0
         for st_T in self.env.goal_states:
             p_success += probs[st_T]
-        return H, p_success
+        return H, p_success, identify_type
 
     def calculate_entropy(self, obs, act):
         """Calculate entropy of belief distribution"""
